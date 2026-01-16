@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 ===========================================
-🛡️  IPTV PRIVACY SERVER - RENDER.COM
+🛡️  IPTV PRIVACY SERVER - TELEVIZO M3U8
 ===========================================
-Servidor privado para listas IPTV anonimizadas
-Modo STEALTH: Sin logos, sin categorías, sin EPG
+Servidor IPTV que genera M3U8 HLS válido para Televizo
 ===========================================
 """
 
@@ -30,8 +29,8 @@ from urllib.parse import urlparse
 app = Flask(__name__)
 auth = HTTPBasicAuth()
 
-# ¡IMPORTANTE! CAMBIA ESTA CONTRASEÑA POR UNA SEGURA
-CONTRASEÑA_SEGURA = "PrivacidadMaxima2024!"  # ¡CAMBIA ESTO!
+# ¡IMPORTANTE! NO CAMBIES LA CONTRASEÑA SI YA FUNCIONA
+CONTRASEÑA_SEGURA = "PrivacidadMaxima2024!"
 USERS = {
     "tv_user": generate_password_hash(CONTRASEÑA_SEGURA)
 }
@@ -40,14 +39,9 @@ USERS = {
 # CONFIGURACIÓN DE TUS FUENTES IPTV
 # ============================================================================
 
-# ¡AÑADE TUS URLs IPTV AQUÍ! (entre las comillas)
+# ¡TU LISTA IPTV REAL! (solo esta línea sin #)
 IPTV_SOURCES = [
-    # EJEMPLOS - REEMPLAZA CON TUS URLs:
-    # "http://tuservidor.com/get.php?username=TU_USUARIO&password=TU_PASS",
-    # "http://otro.com:8000/live/usuario/contraseña/token.m3u8",
-   
-    # DEJA AL MENOS UNA PARA PRUEBAS:
-    "http://urbi.myftp.org:47247/get.php?username=cunadopablo&password=5689P4&type=m3u_plus&output=m3u8"
+    "http://urbi.myftp.org:47247/get.php?username=cunadopablo&password=5689P4&type=m3u_plus&output=m3u8",
 ]
 
 # ============================================================================
@@ -55,11 +49,11 @@ IPTV_SOURCES = [
 # ============================================================================
 
 PRIVACY_CONFIG = {
-    "remove_php": True,          # Eliminar streams PHP (SÍ)
-    "remove_epg": True,          # Eliminar EPG metadata (SÍ)
-    "remove_logos": True,        # Eliminar logos (SÍ - STEALTH)
-    "remove_categories": True,   # Eliminar categorías (SÍ - STEALTH)
-    "obfuscate_names": False,    # No ofuscar nombres (mejor legibilidad)
+    "remove_php": True,          # Eliminar streams PHP
+    "remove_epg": True,          # Eliminar EPG metadata
+    "remove_logos": True,        # Eliminar logos
+    "remove_categories": True,   # Eliminar categorías
+    "obfuscate_names": False,    # No ofuscar nombres
     "update_interval_hours": 6,  # Actualizar cada 6 horas
 }
 
@@ -68,13 +62,12 @@ PRIVACY_CONFIG = {
 # ============================================================================
 
 CURRENT_PLAYLIST = """#EXTM3U
-#EXTINF:-1,⚠️  SERVIDOR EN CONFIGURACIÓN
-# Este es el servidor IPTV privado
-# Añade tus URLs IPTV en render_app.py
-#EXTINF:-1,📺 Canal de Prueba 1
-http://example.com/test1.ts
-#EXTINF:-1,📻 Canal de Prueba 2
-http://example.com/test2.m3u8
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:10.0,📡 Servidor IPTV Privado
+https://iptv-privacy-server.onrender.com/welcome.ts
+#EXT-X-ENDLIST
 """
 
 # ============================================================================
@@ -82,11 +75,11 @@ http://example.com/test2.m3u8
 # ============================================================================
 
 def setup_logging():
-    """Configura logging sin información sensible"""
+    """Configura logging detallado"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%H:%M:%S'
     )
     return logging.getLogger(__name__)
 
@@ -98,144 +91,230 @@ logger = setup_logging()
 
 @auth.verify_password
 def verify_password(username, password):
-    """Verifica usuario/contraseña sin log sensitive"""
+    """Verifica usuario/contraseña"""
     if username in USERS and check_password_hash(USERS.get(username), password):
-        logger.info("Acceso autorizado")
+        logger.info(f"✅ Acceso autorizado para {username}")
         return username
-    logger.warning("Intento de acceso fallido")
+    logger.warning(f"❌ Intento de acceso fallido: {username}")
     return None
 
 # ============================================================================
-# FUNCIONES DE PROCESAMIENTO IPTV
+# FUNCIONES DE PROCESAMIENTO IPTV (REPARADAS)
 # ============================================================================
 
-def download_iptv_list(url):
-    """Descarga lista IPTV de forma anónima"""
+def descargar_lista_iptv(url):
+    """Descarga lista IPTV manteniendo formato original"""
     try:
-        logger.info(f"Descargando lista")
-       
+        logger.info(f"📥 Descargando lista M3U8...")
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*',
+            'Accept': 'application/x-mpegURL, */*',
             'Accept-Language': 'en-US,en;q=0.5',
             'Connection': 'keep-alive',
             'DNT': '1',
         }
-       
-        response = requests.get(url, headers=headers, timeout=30, verify=False)
-        response.raise_for_status()
-       
-        return response.text
-       
+        
+        response = requests.get(url, headers=headers, timeout=60, verify=False)
+        
+        if response.status_code == 200:
+            contenido = response.text
+            
+            # Verificaciones críticas
+            if not contenido.strip():
+                logger.error("❌ Lista vacía recibida")
+                return None
+            
+            if "#EXTM3U" not in contenido:
+                logger.error("❌ No es archivo M3U/M3U8 válido (falta #EXTM3U)")
+                return None
+            
+            # Análisis del formato
+            lineas_totales = len(contenido.split('\n'))
+            canales = contenido.count("#EXTINF:")
+            es_hls = "#EXT-X-" in contenido
+            
+            logger.info(f"✅ Descarga exitosa")
+            logger.info(f"   📊 {lineas_totales} líneas, {canales} canales")
+            logger.info(f"   🎬 Formato: {'HLS/M3U8' if es_hls else 'M3U simple'}")
+            
+            return contenido
+            
+        else:
+            logger.error(f"❌ Error HTTP {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        logger.error("⏰ Timeout: El servidor IPTV no responde")
+        return None
     except Exception as e:
-        logger.error(f"Error descarga: {str(e)[:50]}")
+        logger.error(f"🔥 Error descarga: {str(e)}")
         return None
 
-def clean_iptv_content(content, config):
-    """Limpia contenido IPTV según configuración de privacidad"""
-    if not content:
+def reparar_formato_m3u8(contenido, config):
+    """Repara y limpia formato M3U8 para hacerlo HLS válido"""
+    if not contenido:
         return ""
-   
-    lines = content.split('\n')
-    cleaned_lines = []
+    
+    lineas = contenido.split('\n')
+    lineas_procesadas = []
     i = 0
-    streams_removed = 0
-    streams_kept = 0
-   
-    while i < len(lines):
-        line = lines[i]
-       
-        # Procesar línea #EXTINF:
-        if "#EXTINF:" in line:
-            # Eliminar metadatos según configuración
-            cleaned_line = line
-           
-            if config["remove_epg"]:
-                cleaned_line = re.sub(r'tvg-id="[^"]*"', '', cleaned_line)
-                cleaned_line = re.sub(r'url-tvg="[^"]*"', '', cleaned_line)
-                cleaned_line = re.sub(r'x-tvg-url="[^"]*"', '', cleaned_line)
-           
-            if config["remove_logos"]:
-                cleaned_line = re.sub(r'tvg-logo="[^"]*"', '', cleaned_line)
-           
-            if config["remove_categories"]:
-                cleaned_line = re.sub(r'group-title="[^"]*"', '', cleaned_line)
-           
-            # Limpiar espacios extra
-            cleaned_line = re.sub(r'\s+', ' ', cleaned_line).strip()
-           
-            # Verificar siguiente línea (URL del stream)
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-               
-                # Eliminar streams PHP si está configurado
-                if config["remove_php"] and ('.php' in next_line.lower()):
-                    streams_removed += 1
-                    i += 2  # Saltar ambas líneas
-                    continue
-               
-                # Mantener stream válido
-                cleaned_lines.append(cleaned_line)
-                cleaned_lines.append(next_line)
-                streams_kept += 1
-                i += 2
-            else:
-                cleaned_lines.append(cleaned_line)
-                i += 1
-       
-        # Eliminar líneas EPG independientes
-        elif config["remove_epg"] and ("url-tvg" in line or "x-tvg-url" in line):
+    canales_procesados = 0
+    
+    # Encabezados HLS obligatorios
+    encabezados_hls = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        "#EXT-X-TARGETDURATION:10",
+        "#EXT-X-MEDIA-SEQUENCE:0"
+    ]
+    
+    # Añadir encabezados si no están
+    tiene_encabezados_hls = any("#EXT-X-VERSION" in l for l in lineas[:10])
+    if not tiene_encabezados_hls:
+        lineas_procesadas.extend(encabezados_hls)
+    
+    while i < len(lineas):
+        linea = lineas[i].strip()
+        
+        # 1. LÍNEA #EXTINF: (CANAL)
+        if "#EXTINF:" in linea:
+            # Extraer duración y nombre
+            partes = linea.split(',', 1)
+            if len(partes) == 2:
+                duracion_part = partes[0].replace("#EXTINF:", "").strip()
+                nombre = partes[1].strip()
+                
+                # Extraer duración numérica
+                duracion_match = re.search(r'([0-9.]+)', duracion_part)
+                duracion = duracion_match.group(1) if duracion_match else "10.0"
+                
+                # Limpiar nombre según configuración
+                if config["remove_epg"]:
+                    nombre = re.sub(r'\[.*?\]', '', nombre)  # Eliminar [EPG info]
+                    nombre = re.sub(r'\(.*?\)', '', nombre)  # Eliminar (info)
+                
+                # Buscar URL en las siguientes líneas (máximo 3 líneas)
+                url_encontrada = None
+                for j in range(1, 4):
+                    if i + j < len(lineas):
+                        posible_url = lineas[i + j].strip()
+                        if (posible_url and 
+                            not posible_url.startswith('#') and 
+                            ('://' in posible_url or '.ts' in posible_url or '.m3u8' in posible_url)):
+                            url_encontrada = posible_url
+                            i += j  # Saltar a la línea de URL
+                            break
+                
+                if url_encontrada:
+                    # Verificar filtro PHP
+                    if config["remove_php"] and '.php' in url_encontrada.lower():
+                        i += 1
+                        continue
+                    
+                    # Añadir canal procesado
+                    lineas_procesadas.append(f"#EXTINF:{duracion},{nombre}")
+                    lineas_procesadas.append(url_encontrada)
+                    canales_procesados += 1
+            
             i += 1
-       
-        # Mantener otras líneas (como #EXTM3U)
+        
+        # 2. LÍNEAS HLS CORRUPTAS (#EXT-X-SESSION-DATA mal formado)
+        elif "#EXT-X-SESSION-DATA" in linea and "DATA-ID=" in linea:
+            # Ignorar línea corrupta completamente
+            i += 1
+        
+        # 3. LÍNEAS HLS VÁLIDAS (#EXT-X-...)
+        elif linea.startswith("#EXT-X-") and "SESSION-DATA" not in linea:
+            # Mantener solo líneas HLS válidas
+            if any(x in linea for x in ["VERSION", "TARGETDURATION", "MEDIA-SEQUENCE", "ENDLIST"]):
+                lineas_procesadas.append(linea)
+            i += 1
+        
+        # 4. METADATOS A ELIMINAR (según configuración)
+        elif config["remove_logos"] and "tvg-logo=" in linea:
+            # Eliminar logos
+            i += 1
+        elif config["remove_categories"] and "group-title=" in linea:
+            # Eliminar categorías
+            i += 1
+        elif config["remove_epg"] and any(x in linea for x in ["tvg-id=", "tvg-name=", "tvg-url="]):
+            # Eliminar EPG
+            i += 1
+        
+        # 5. URL SUELTA (sin #EXTINF antes)
+        elif (linea and not linea.startswith('#') and 
+              '://' in linea and
+              (i == 0 or not lineas[i-1].strip().startswith("#EXTINF:"))):
+            # Crear entrada genérica
+            lineas_procesadas.append(f"#EXTINF:10.0,Canal {canales_procesados+1}")
+            lineas_procesadas.append(linea)
+            canales_procesados += 1
+            i += 1
+        
+        # 6. OTRAS LÍNEAS (# comentarios, etc)
+        elif linea.startswith("#") and not linea.startswith("#EXT"):
+            # Mantener comentarios simples
+            lineas_procesadas.append(linea)
+            i += 1
         else:
-            cleaned_lines.append(line)
             i += 1
-   
-    logger.info(f"Procesado: {streams_kept} streams mantenidos, {streams_removed} eliminados")
-   
-    return '\n'.join(cleaned_lines)
+    
+    # Asegurar EXT-X-ENDLIST al final
+    if not any("#EXT-X-ENDLIST" in l for l in lineas_procesadas):
+        lineas_procesadas.append("#EXT-X-ENDLIST")
+    
+    logger.info(f"🔄 Formato reparado: {canales_procesados} canales procesados")
+    
+    return '\n'.join(lineas_procesadas)
 
-def update_all_playlists():
-    """Actualiza todas las listas configuradas"""
+def actualizar_playlists():
+    """Actualiza todas las listas y repara formato"""
     if not IPTV_SOURCES:
-        logger.warning("No hay fuentes IPTV configuradas")
-        return {"status": "info", "message": "Configura tus fuentes IPTV en render_app.py"}
-   
-    all_content = ""
-   
-    for source in IPTV_SOURCES:
-        logger.info(f"Procesando fuente")
-       
+        logger.warning("⚠️ No hay fuentes IPTV configuradas")
+        return {
+            "status": "error",
+            "message": "Configura tus fuentes IPTV en app.py"
+        }
+    
+    todo_contenido = ""
+    
+    for fuente in IPTV_SOURCES:
+        logger.info(f"🔄 Procesando fuente: {fuente[:50]}...")
+        
         # Descargar
-        content = download_iptv_list(source)
-        if not content:
+        contenido = descargar_lista_iptv(fuente)
+        if not contenido:
+            logger.error(f"❌ No se pudo descargar: {fuente[:50]}")
             continue
-       
-        # Limpiar
-        cleaned = clean_iptv_content(content, PRIVACY_CONFIG)
-        if cleaned:
-            all_content += cleaned + "\n"
-   
-    # Guardar playlist combinada
-    if all_content and len(all_content) > 100:  # Más de solo encabezado
-        # Asegurar encabezado M3U
-        if not all_content.startswith("#EXTM3U"):
-            all_content = "#EXTM3U\n" + all_content
-       
-        # Actualizar playlist global
+        
+        # Reparar y limpiar
+        reparado = reparar_formato_m3u8(contenido, PRIVACY_CONFIG)
+        if reparado:
+            todo_contenido += reparado + "\n"
+    
+    # Actualizar playlist global
+    if todo_contenido and len(todo_contenido) > 100:
         global CURRENT_PLAYLIST
-        CURRENT_PLAYLIST = all_content
-       
-        logger.info(f"Playlist actualizada: {len(all_content.splitlines())} líneas")
+        CURRENT_PLAYLIST = todo_contenido
+        
+        canales = todo_contenido.count("#EXTINF:")
+        logger.info(f"✅ Playlist actualizada: {canales} canales")
+        
         return {
             "status": "success",
-            "message": f"Playlist actualizada",
-            "lines": len(all_content.splitlines()),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "message": "Playlist M3U8 actualizada",
+            "canales": canales,
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "formato": "HLS/M3U8 válido"
         }
-   
-    return {"status": "warning", "message": "Usando playlist de prueba"}
+    
+    # Fallback si todo falla
+    return {
+        "status": "warning",
+        "message": "Usando playlist de respaldo",
+        "canales": 1
+    }
 
 # ============================================================================
 # RUTAS WEB PRINCIPALES
@@ -244,25 +323,12 @@ def update_all_playlists():
 @app.route('/')
 @auth.login_required
 def index():
-    """Página principal del servidor"""
-    stats = {
-        "sources": len(IPTV_SOURCES),
-        "privacy_mode": "STEALTH",
-        "features": [
-            "✅ Sin logos identificables",
-            "✅ Sin categorías reveladoras",
-            "✅ Sin EPG/metadatos",
-            "✅ Streams directos solamente",
-            "✅ HTTPS seguro",
-            "✅ Actualización automática"
-        ]
-    }
-   
-    html = f"""
+    """Página principal"""
+    html = f'''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🛡️ Servidor IPTV Privado</title>
+        <title>🎬 IPTV M3U8 - Televizo</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
@@ -290,12 +356,6 @@ def index():
                 border-radius: 10px;
                 border: 1px solid #334155;
             }}
-            .feature-list {{
-                background: #0f172a;
-                padding: 1rem;
-                border-radius: 8px;
-                margin: 1rem 0;
-            }}
             .btn {{
                 display: inline-block;
                 background: #3b82f6;
@@ -312,11 +372,8 @@ def index():
             .btn:hover {{
                 background: #2563eb;
             }}
-            .btn.warning {{
-                background: #f59e0b;
-            }}
-            .btn.warning:hover {{
-                background: #d97706;
+            .btn.success {{
+                background: #10b981;
             }}
             .url-box {{
                 background: #1e293b;
@@ -327,11 +384,11 @@ def index():
                 border: 1px solid #475569;
                 word-break: break-all;
             }}
-            footer {{
-                text-align: center;
-                margin-top: 2rem;
-                color: #94a3b8;
-                font-size: 0.9rem;
+            code {{
+                background: #334155;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
             }}
             .status {{
                 display: inline-block;
@@ -344,94 +401,53 @@ def index():
                 background: #10b981;
                 color: white;
             }}
-            .config-box {{
-                background: #0f172a;
-                padding: 1rem;
-                border-radius: 8px;
-                margin: 1rem 0;
-                border-left: 4px solid #3b82f6;
-            }}
-            code {{
-                background: #1e293b;
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-family: 'Courier New', monospace;
-            }}
         </style>
     </head>
     <body>
         <div class="header">
-            <h1>🛡️ Servidor IPTV Privado</h1>
-            <p>Tu contenido seguro y anónimo</p>
-            <span class="status online">● EN LÍNEA</span>
+            <h1>🎬 Servidor IPTV M3U8</h1>
+            <p>Formato HLS válido para Televizo</p>
+            <span class="status online">● HLS VÁLIDO</span>
         </div>
-       
+        
         <div class="card">
-            <h2>📊 Estado del Servidor</h2>
-            <p>• Fuentes configuradas: <strong>{stats['sources']}</strong></p>
-            <p>• Modo privacidad: <strong>{stats['privacy_mode']}</strong></p>
-            <p>• Actualización automática: <strong>Cada {PRIVACY_CONFIG['update_interval_hours']} horas</strong></p>
-        </div>
-       
-        <div class="card">
-            <h2>🛡️ Características de Privacidad</h2>
-            <div class="feature-list">
-    """
-   
-    for feature in stats["features"]:
-        html += f"<p>{feature}</p>"
-   
-    html += f"""
-            </div>
-        </div>
-       
-        <div class="card">
-            <h2>📥 Descargar Playlist</h2>
-            <p>Usa esta URL en Televizo o cualquier reproductor:</p>
-            <div class="url-box" id="playlistUrl">
-                https://{request.host}/playlist.m3u8
+            <h2>📡 URL para Televizo</h2>
+            <div class="url-box">
+                https://iptv-privacy-server.onrender.com/playlist.m3u8
             </div>
             <button class="btn" onclick="copyUrl()">📋 Copiar URL</button>
-            <a href="/playlist.m3u8" class="btn">⬇️ Descargar Ahora</a>
+            <a href="/playlist.m3u8" class="btn success">⬇️ Descargar Ahora</a>
         </div>
-       
+        
         <div class="card">
-            <h2>⚙️ Acciones</h2>
-            <a href="/update" class="btn">🔄 Actualizar Ahora</a>
-            <a href="/config" class="btn">⚙️ Ver Configuración</a>
+            <h2>⚙️ Configuración en Televizo</h2>
+            <p>1. <strong>Añadir lista</strong> → <strong>URL</strong></p>
+            <p>2. <strong>URL:</strong> <code>https://iptv-privacy-server.onrender.com/playlist.m3u8</code></p>
+            <p>3. <strong>Marcar:</strong> ✓ HTTP Authentication</p>
+            <p>4. <strong>Usuario:</strong> <code>tv_user</code></p>
+            <p>5. <strong>Contraseña:</strong> <code>{CONTRASEÑA_SEGURA}</code></p>
+            <p>6. <strong>¡Guardar y disfrutar!</strong></p>
         </div>
-       
+        
         <div class="card">
-            <h2>🔧 Configuración Necesaria</h2>
-            <div class="config-box">
-                <p><strong>⚠️ ATENCIÓN:</strong> Este servidor está funcionando, pero necesita tu configuración.</p>
-                <p>1. Edita el archivo <code>render_app.py</code></p>
-                <p>2. Encuentra la sección <code>IPTV_SOURCES</code></p>
-                <p>3. Añade tus URLs IPTV reales</p>
-                <p>4. Sube los cambios a GitHub</p>
-                <p>5. Render se actualizará automáticamente</p>
-            </div>
-            <a href="/instructions" class="btn warning">📖 Ver Instrucciones Detalladas</a>
+            <h2>🔧 Herramientas</h2>
+            <a href="/update" class="btn">🔄 Actualizar Lista</a>
+            <a href="/debug" class="btn">🐛 Información Debug</a>
+            <a href="/check" class="btn">✅ Verificar Formato</a>
         </div>
-       
+        
         <div class="card">
-            <h2>📱 Instrucciones para Televizo</h2>
-            <p>1. Abre Televizo en tu Android</p>
-            <p>2. Ve a "Añadir lista" → "URL"</p>
-            <p>3. Pega la URL de arriba</p>
-            <p>4. Usuario: <code>tv_user</code></p>
-            <p>5. Contraseña: <code>{CONTRASEÑA_SEGURA}</code></p>
-            <p>6. ¡Listo! (añade tus URLs después)</p>
+            <h2>🎯 Características</h2>
+            <p>• ✅ Formato M3U8 HLS válido</p>
+            <p>• ✅ Compatible con Televizo 100%</p>
+            <p>• ✅ Líneas HLS corruptas eliminadas</p>
+            <p>• ✅ Encabezados HLS correctos</p>
+            <p>• ✅ Actualización automática cada 6h</p>
         </div>
-       
-        <footer>
-            <p>Servidor IPTV Privado v1.0 • Modo STEALTH activado</p>
-            <p>🔒 No se almacenan logs • No se comparten datos • 100% Privado</p>
-        </footer>
-       
+        
         <script>
             function copyUrl() {{
-                const url = document.getElementById('playlistUrl').textContent;
+                const url = "https://iptv-privacy-server.onrender.com/playlist.m3u8";
                 navigator.clipboard.writeText(url).then(() => {{
                     alert('URL copiada al portapapeles ✓');
                 }});
@@ -439,167 +455,116 @@ def index():
         </script>
     </body>
     </html>
-    """
-   
+    '''
     return html
 
 @app.route('/playlist.m3u8')
 @auth.login_required
 def get_playlist():
-    """Devuelve la playlist actual en formato M3U8"""
+    """Devuelve playlist en formato M3U8 HLS válido"""
     response = make_response(CURRENT_PLAYLIST)
     response.headers['Content-Type'] = 'application/vnd.apple.mpegurl'
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
-   
-    logger.info("Playlist servida a cliente")
+    
+    logger.info("🎬 Playlist M3U8 servida a cliente")
     return response
 
 @app.route('/update')
 @auth.login_required
 def update_now():
     """Fuerza una actualización manual"""
-    result = update_all_playlists()
+    result = actualizar_playlists()
     return jsonify(result)
 
-@app.route('/config')
+@app.route('/debug')
 @auth.login_required
-def show_config():
-    """Muestra la configuración actual"""
-    config_display = {
-        "privacy_settings": PRIVACY_CONFIG,
-        "sources_count": len(IPTV_SOURCES),
-        "sources_configured": IPTV_SOURCES if IPTV_SOURCES else ["⚠️ No hay fuentes configuradas"],
-        "current_user": auth.current_user(),
-        "server_status": "online",
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def debug_info():
+    """Información de diagnóstico"""
+    canales = CURRENT_PLAYLIST.count("#EXTINF:")
+    lineas = len(CURRENT_PLAYLIST.split('\n'))
+    tamaño = len(CURRENT_PLAYLIST)
+    
+    # Detectar formato
+    es_hls_valido = all(x in CURRENT_PLAYLIST for x in ["#EXTM3U", "#EXT-X-VERSION", "#EXT-X-ENDLIST"])
+    formato = "HLS/M3U8 válido" if es_hls_valido else "M3U simple"
+    
+    # Primeras 5 líneas
+    primeras_lineas = '\n'.join(CURRENT_PLAYLIST.split('\n')[:5])
+    
+    return jsonify({
+        "status": "online",
+        "canales": canales,
+        "lineas": lineas,
+        "tamaño_bytes": tamaño,
+        "formato": formato,
+        "hls_valido": es_hls_valido,
+        "primeras_lineas": primeras_lineas,
+        "timestamp": datetime.now().isoformat(),
+        "fuentes_configuradas": len(IPTV_SOURCES),
+        "actualizacion_automatica": f"Cada {PRIVACY_CONFIG['update_interval_hours']} horas"
+    })
+
+@app.route('/check')
+@auth.login_required
+def check_format():
+    """Verifica formato HLS específicamente"""
+    checks = {
+        "tiene_extm3u": "#EXTM3U" in CURRENT_PLAYLIST,
+        "tiene_ext_x_version": "#EXT-X-VERSION" in CURRENT_PLAYLIST,
+        "tiene_ext_x_endlist": "#EXT-X-ENDLIST" in CURRENT_PLAYLIST,
+        "tiene_extinf": "#EXTINF:" in CURRENT_PLAYLIST,
+        "no_tiene_corrupto": "#EXT-X-SESSION-DATA" not in CURRENT_PLAYLIST or "DATA-ID=" not in CURRENT_PLAYLIST,
+        "lineas_totales": len(CURRENT_PLAYLIST.split('\n')),
+        "canales_totales": CURRENT_PLAYLIST.count("#EXTINF:")
     }
-    return jsonify(config_display)
-
-@app.route('/instructions')
-@auth.login_required
-def instructions():
-    """Página de instrucciones detalladas"""
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Instrucciones de Configuración</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                padding: 20px;
-                max-width: 800px;
-                margin: 0 auto;
-            }
-            .step {
-                background: #f5f5f5;
-                padding: 15px;
-                margin: 10px 0;
-                border-radius: 8px;
-            }
-            code {
-                background: #333;
-                color: white;
-                padding: 10px;
-                display: block;
-                margin: 10px 0;
-                border-radius: 5px;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>📖 Instrucciones de Configuración</h1>
-       
-        <div class="step">
-            <h2>Paso 1: Editar render_app.py</h2>
-            <p>Encuentra esta sección en el archivo:</p>
-            <code>
-# ¡AÑADE TUS URLs IPTV AQUÍ! (entre las comillas)<br>
-IPTV_SOURCES = [<br>
-&nbsp;&nbsp;# EJEMPLOS - REEMPLAZA CON TUS URLs:<br>
-&nbsp;&nbsp;# "http://tuservidor.com/get.php?username=TU_USUARIO&password=TU_PASS",<br>
-&nbsp;&nbsp;# "http://otro.com:8000/live/usuario/contraseña/token.m3u8",<br>
-]<br>
-            </code>
-        </div>
-       
-        <div class="step">
-            <h2>Paso 2: Añadir tus URLs</h2>
-            <p>Ejemplo de cómo quedaría:</p>
-            <code>
-IPTV_SOURCES = [<br>
-&nbsp;&nbsp;"http://tuservidor1.com/get.php?username=TU1&password=PASS1",<br>
-&nbsp;&nbsp;"http://tuservidor2.com:8000/live/user/pass/123.m3u8",<br>
-&nbsp;&nbsp;"http://servidor3.com/lista.m3u"<br>
-]<br>
-            </code>
-        </div>
-       
-        <div class="step">
-            <h2>Paso 3: Cambiar contraseña (opcional pero recomendado)</h2>
-            <p>Encuentra esta línea:</p>
-            <code>CONTRASEÑA_SEGURA = "PrivacidadMaxima2024!"</code>
-            <p>Cámbiala por una contraseña segura.</p>
-        </div>
-       
-        <div class="step">
-            <h2>Paso 4: Subir cambios a GitHub</h2>
-            <p>Desde Git Bash en Windows:</p>
-            <code>
-cd /c/IPTV_Privado<br>
-git add .<br>
-git commit -m "Added my IPTV sources"<br>
-git push origin main<br>
-            </code>
-        </div>
-       
-        <div class="step">
-            <h2>Paso 5: Render se actualiza automáticamente</h2>
-            <p>Espera 2-3 minutos y refresca tu servidor.</p>
-        </div>
-       
-        <a href="/">← Volver al servidor</a>
-    </body>
-    </html>
-    """
-    return html
+    
+    checks["hls_completamente_valido"] = all([
+        checks["tiene_extm3u"],
+        checks["tiene_ext_x_version"],
+        checks["tiene_ext_x_endlist"],
+        checks["tiene_extinf"],
+        checks["no_tiene_corrupto"]
+    ])
+    
+    return jsonify({
+        "verificacion_hls": checks,
+        "compatible_televizo": checks["hls_completamente_valido"],
+        "mensaje": "✅ Formato HLS válido para Televizo" if checks["hls_completamente_valido"] else "❌ Problemas detectados"
+    })
 
 # ============================================================================
-# INICIALIZACIÓN Y CONFIGURACIÓN PROGRAMADA
+# INICIALIZACIÓN Y TAREAS PROGRAMADAS
 # ============================================================================
 
-def initialize_server():
-    """Inicializa el servidor"""
-    logger.info("=" * 60)
-    logger.info("🛡️  INICIANDO SERVIDOR IPTV PRIVADO")
-    logger.info("=" * 60)
-   
-    # Configurar actualización automática
-    interval = PRIVACY_CONFIG["update_interval_hours"]
-    schedule.every(interval).hours.do(update_all_playlists)
-   
-    logger.info(f"Actualización automática configurada cada {interval} horas")
-   
-    logger.info("Servidor listo en modo de prueba")
-    logger.info(f"Usuario: tv_user | Contraseña: {CONTRASEÑA_SEGURA}")
+def inicializar_servidor():
+    """Inicializa el servidor con actualización"""
+    logger.info("="*60)
+    logger.info("🎬 INICIANDO SERVIDOR IPTV M3U8 PARA TELEVIZO")
+    logger.info("="*60)
+    
+    # Actualizar al inicio
+    logger.info("🔄 Actualizando lista al inicio...")
+    resultado = actualizar_playlists()
+    
+    if resultado["status"] == "success":
+        logger.info(f"✅ {resultado['canales']} canales cargados")
+    else:
+        logger.warning("⚠️ Usando playlist de respaldo")
+    
+    # Programar actualizaciones automáticas
+    intervalo = PRIVACY_CONFIG["update_interval_hours"]
+    schedule.every(intervalo).hours.do(actualizar_playlists)
+    
+    logger.info(f"⏰ Actualización automática cada {intervalo} horas")
+    logger.info(f"🔑 Usuario: tv_user | Contraseña: {CONTRASEÑA_SEGURA}")
+    logger.info("🌐 Servidor listo en modo HLS/M3U8")
 
 # ============================================================================
 # EJECUCIÓN PRINCIPAL
 # ============================================================================
 
-if __name__ == "__main__":
-    # Inicializar servidor
-    initialize_server()
-   
-    # Iniciar Flask
-    port = int(os.environ.get("PORT", 5000))
-   
-    # En Render, necesitamos ejecutar así
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False,
-        threaded=True
-    )
+if __name__ == '__main__':
+    inicializar_servidor()
+    app.run(host='0.0.0.0', port=5000, debug=False)
