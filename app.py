@@ -47,7 +47,7 @@ IPTV_SOURCES = [
     # "http://otro.com:8000/live/usuario/contraseña/token.m3u8",
    
     # DEJA AL MENOS UNA PARA PRUEBAS:
-    "http://example.com/test.m3u"  # Esto es solo para prueba inicial
+    "http://urbi.myftp.org:47247/get.php?username=cunadopablo&password=5689P4&type=m3u_plus&output=m3u8"
 ]
 
 # ============================================================================
